@@ -17,7 +17,8 @@ interface Tournament {
     gameId: string;
     participants: { [key: string]: { joinedAt: string; score: number } };
     participantsCount: number;
-    status: "Active" | "Paused" | "Ended" | "Scheduled"
+    status: "Active" | "Paused" | "Ended" | "Scheduled",
+    createdBy: string
 }
 
 
@@ -67,7 +68,8 @@ export function createTournament(req: Request, res: Response) {
             gameId,
             status: "Scheduled",
             participants: {},
-            participantsCount: 0
+            participantsCount: 0,
+            createdBy: adminPublicKey
         };
 
         set(newTournamentRef, tournament)
@@ -151,7 +153,7 @@ export const createTournamentPool = async (adminPublicKey: string, tournamentId:
 
 export const userParticipation = async (req: Request, res: Response) => {
     try {
-        const { userId, tournamentId } = req.body;
+        const { userId, tournamentId, mint } = req.body;
 
         if (!userId || !tournamentId) {
             return res.status(400).json({ message: "Missing userId or tournamentId" });
@@ -165,7 +167,6 @@ export const userParticipation = async (req: Request, res: Response) => {
         }
 
         const tournamentData = tournamentSnapshot.val();
-
         // Check if user is already participating
         if (tournamentData.participants && tournamentData.participants[userId]) {
             return res.status(400).json({ message: "User already participates in this tournament" });
@@ -187,6 +188,12 @@ export const userParticipation = async (req: Request, res: Response) => {
 
         // Update tournament with new participant
         await set(tournamentRef, tournamentData);
+
+        const onChainParticipation = await registerForTournamentService(
+            mint,
+            userId,
+            tournamentData?.createdBy
+        )
 
         return res.status(200).json({
             message: "User added to tournament successfully",
