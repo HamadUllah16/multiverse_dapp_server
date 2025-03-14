@@ -1,22 +1,23 @@
 import { Request, Response } from "express";
-import { ref, get, set, push } from "firebase/database";
+import { ref, get, set, push, update } from "firebase/database";
 import { db } from "../config/firebase";  // Assuming db is your Firebase database instance
 import { getTournamentPool, initializeAccountsService, registerForTournamentService, registerForTournamentServiceWithKeypair } from './services';
 import { PublicKey } from "@solana/web3.js";
 import { initializeAccount2InstructionData } from "@solana/spl-token/lib/types";
+import schedule from 'node-schedule';
 
 // Define Tournament interface
 interface Tournament {
     id: string;
     name: string;
     description: string;
-    entryFee: string;
+    entryFee: number;
     startTime: string;
     endTime: string;
     gameId: string;
     participants: { [key: string]: { joinedAt: string; score: number } };
     participantsCount: number;
-    status: "Active" | "Paused" | "Ended"
+    status: "Active" | "Paused" | "Ended" | "Scheduled"
 }
 
 
@@ -39,35 +40,43 @@ export async function getAllGames(req: Request, res: Response) {
 
 export function createTournament(req: Request, res: Response) {
     try {
-        const { name, description, startTime, endTime, gameId } = req.body as Tournament;
+        const { name, description, startTime, endTime, entryFee } = req.body as Tournament;
+        const { adminPublicKey, mint } = req.body;
 
-        // Validate required fields
+        const gameId = "1"; //TODO: create game table and add kaya d.dawg into it
+
         if (!name || !gameId || !startTime || !endTime) {
             return res.status(400).json({ message: "Missing required fields" });
         }
 
-        // Create a reference to the tournaments node
         const tournamentsRef = ref(db, 'tournaments');
-
-        // Generate a new unique key for the tournament
         const newTournamentRef = push(tournamentsRef);
+        const tournamentId = newTournamentRef.key;
 
-        // Create tournament object
-        const tournament = {
-            id: newTournamentRef.key,
+        if (!tournamentId) {
+            return res.status(500).json({ message: "Failed to generate tournament ID" });
+        }
+
+        const tournament: Tournament = {
+            id: tournamentId,
             name,
             description,
+            entryFee,
             startTime,
             endTime,
             gameId,
-            createdAt: new Date().toISOString(),
-            participants: {}, // Initialize empty participants object
+            status: "Scheduled",
+            participants: {},
             participantsCount: 0
         };
 
-        // Set the tournament data
         set(newTournamentRef, tournament)
             .then(() => {
+                console.log(`Tournament ${tournamentId} created successfully.`);
+
+                // Schedule tournament status update
+                scheduleTournamentStart(tournamentId, startTime, adminPublicKey, endTime, entryFee, mint);
+
                 return res.status(201).json({
                     message: "Tournament created successfully",
                     tournament
@@ -84,30 +93,59 @@ export function createTournament(req: Request, res: Response) {
     }
 }
 
+// Schedule tournament start
+function scheduleTournamentStart(tournamentId: string, startTime: string, adminPublicKey: string, endTime: string, entryFee: number, mint: string) {
+    const startDate = new Date(startTime);
+
+    if (startDate <= new Date()) {
+        console.error(`Invalid start time for tournament ${tournamentId}. It must be in the future.`);
+        return;
+    }
+
+    schedule.scheduleJob(startDate, async () => {
+        try {
+            const tournamentRef = ref(db, `tournaments/${tournamentId}`);
+
+            await update(tournamentRef, { status: "Active" });
+            console.log(`Tournament ${tournamentId} has started and status is updated.`);
+
+            const tournamentPool = await createTournamentPool(
+                adminPublicKey,
+                tournamentId,
+                entryFee,
+                mint
+            )
+        } catch (error) {
+            console.error(`Failed to start tournament ${tournamentId}: `, error);
+        }
+    });
+
+    console.log(`Scheduled tournament ${tournamentId} to start at ${startDate}`);
+}
+
+
 
 
 // Controller for creating the tournament pool
-export const createTournamentPool = async (req: Request, res: Response) => {
+export const createTournamentPool = async (adminPublicKey: string, tournamentId: string, entryFee: number, mint: string) => {
     try {
-        const { adminPublicKey, tournamentId, entryFee, mint } = req.body;
-
-        if (!adminPublicKey|| !tournamentId || !entryFee || !mint) {
-            return res.status(400).json({ message: 'Missing required fields: tournamentId, entryFee, mint' });
+        if (!adminPublicKey || !tournamentId || !entryFee || !mint) {
+            return ({ message: 'Missing required fields: tournamentId, entryFee, mint' });
         }
-        
+
         const adminAdress = new PublicKey(adminPublicKey);
         const mintPublicKey = new PublicKey(mint);
         // Call the service to create the tournament pool
         const result = await initializeAccountsService(adminAdress, tournamentId, entryFee, mintPublicKey);
 
         if (result.success) {
-            return res.status(200).json({ message: result.message });
+            return ({ message: result.message });
         } else {
-            return res.status(500).json({ message: result.message });
+            return ({ message: result.message });
         }
     } catch (error) {
         console.error('Error creating tournament pool:', error);
-        return res.status(500).json({ message: 'Error creating tournament pool' });
+        return ({ message: 'Error creating tournament pool' });
     }
 };
 
@@ -243,76 +281,76 @@ export async function getTournamentById(req: Request, res: Response) {
 
 // Controller to handle the register for tournament logic
 export const registerForTournamentController = async (req: Request, res: Response) => {
-  try {
-    // Destructure the mintPublicKey and adminPublicKey from the request body
-    const { mintPublicKey, adminPublicKey, userPublicKey } = req.body;
+    try {
+        // Destructure the mintPublicKey and adminPublicKey from the request body
+        const { mintPublicKey, adminPublicKey, userPublicKey } = req.body;
 
-    // Validate the inputs
-    if (!mintPublicKey || !adminPublicKey || !userPublicKey) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing mintPublicKey or adminPublicKey in the request body',
-      });
-    }
+        // Validate the inputs
+        if (!mintPublicKey || !adminPublicKey || !userPublicKey) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing mintPublicKey or adminPublicKey in the request body',
+            });
+        }
 
-    // Convert the public keys from base58 to PublicKey
-    const mint = new PublicKey(mintPublicKey);
-    const admin = new PublicKey(adminPublicKey);
-    const user = new PublicKey(userPublicKey);
+        // Convert the public keys from base58 to PublicKey
+        const mint = new PublicKey(mintPublicKey);
+        const admin = new PublicKey(adminPublicKey);
+        const user = new PublicKey(userPublicKey);
 
 
-    // Call the service function to register the user for the tournament
-    const result = await registerForTournamentService(mint, user, admin);
+        // Call the service function to register the user for the tournament
+        const result = await registerForTournamentService(mint, user, admin);
 
-    if (result.success) {
-        return res.status(200).json(result);
-      } else {
-        return res.status(500).json(result);
-      }
+        if (result.success) {
+            return res.status(200).json(result);
+        } else {
+            return res.status(500).json(result);
+        }
     } catch (err) {
-      console.error("Error in staking tokens:", err);
-      return res.status(500).json({ success: false, message: "Internal server error" });
-};
+        console.error("Error in staking tokens:", err);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    };
 }
 
 
 export const getTournamentPoolController = async (req: Request, res: Response) => {
-  try {
-    // Destructure the userPublicKey from the request body
-    const { userPublicKey } = req.body;
+    try {
+        // Destructure the userPublicKey from the request body
+        const { userPublicKey } = req.body;
 
-    // Validate the inputs
-    if (!userPublicKey) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing userPublicKey in the request body',
-      });
+        // Validate the inputs
+        if (!userPublicKey) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing userPublicKey in the request body',
+            });
+        }
+
+        // Convert the public key from base58 to PublicKey
+        const userAddress = new PublicKey(userPublicKey);
+
+        // Call the service function to fetch the tournament pool data
+        const result = await getTournamentPool(userAddress);
+
+        // Send the response based on the result of the service function
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                message: 'Tournament pool data fetched successfully',
+                data: result.data,  // Send the fetched tournament pool data in the response
+            });
+        } else {
+            return res.status(500).json({
+                success: false,
+                message: result.message,  // Send the error message from the service
+            });
+        }
+    } catch (error) {
+        console.error('Error in getTournamentPoolController:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'An error occurred while fetching the tournament pool.',
+        });
     }
-
-    // Convert the public key from base58 to PublicKey
-    const userAddress = new PublicKey(userPublicKey);
-
-    // Call the service function to fetch the tournament pool data
-    const result = await getTournamentPool(userAddress);
-
-    // Send the response based on the result of the service function
-    if (result.success) {
-      return res.status(200).json({
-        success: true,
-        message: 'Tournament pool data fetched successfully',
-        data: result.data,  // Send the fetched tournament pool data in the response
-      });
-    } else {
-      return res.status(500).json({
-        success: false,
-        message: result.message,  // Send the error message from the service
-      });
-    }
-  } catch (error) {
-    console.error('Error in getTournamentPoolController:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'An error occurred while fetching the tournament pool.',
-    });
-  }
 };

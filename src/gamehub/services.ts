@@ -1,87 +1,87 @@
 import {
-    Connection,
-    PublicKey,
-    Keypair,
-    SystemProgram,
-    clusterApiUrl,
-    Transaction,
-  } from "@solana/web3.js";
-  import * as anchor from "@project-serum/anchor";
-  import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
-  import dotenv from "dotenv";
-  import { bs58 } from "@project-serum/anchor/dist/cjs/utils/bytes";
+  Connection,
+  PublicKey,
+  Keypair,
+  SystemProgram,
+  clusterApiUrl,
+  Transaction,
+} from "@solana/web3.js";
+import * as anchor from "@project-serum/anchor";
+import { createAssociatedTokenAccountInstruction, getAssociatedTokenAddressSync, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
+import dotenv from "dotenv";
+import { bs58 } from "@project-serum/anchor/dist/cjs/utils/bytes";
 import { BN } from "bn.js";
-  
-  dotenv.config();
-  
-  // Helper function to get the program
-  const getProgram = () => {
-    const idl = require("../gamehub/gamehub_idl.json");  // The IDL of your smart contract
-    const walletKeypair = require("../staking/testWallet.json"); // Admin wallet keypair
-  
-    const adminKeypair = Keypair.fromSecretKey(new Uint8Array(walletKeypair));
-    const adminPublicKey = adminKeypair.publicKey;
-  
-    const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
-  
-    const programId = new PublicKey(
-      "BmBAppuJQGGHmVizxKLBpJbFtq8yGe9v7NeVgHPEM4Vs" // Replace with your actual program ID
-    );
-  
-    const provider = new anchor.AnchorProvider(
-      connection,
-      new anchor.Wallet(adminKeypair),
-      anchor.AnchorProvider.defaultOptions()
-    );
-    anchor.setProvider(provider);
-  
-    return {
-      program: new anchor.Program(idl, programId, provider),
-      adminPublicKey,
-      adminKeypair,
-      connection,
-    };
+
+dotenv.config();
+
+// Helper function to get the program
+const getProgram = () => {
+  const idl = require("../gamehub/gamehub_idl.json");  // The IDL of your smart contract
+  const walletKeypair = require("../staking/testWallet.json"); // Admin wallet keypair
+
+  const adminKeypair = Keypair.fromSecretKey(new Uint8Array(walletKeypair));
+  const adminPublicKey = adminKeypair.publicKey;
+
+  const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+
+  const programId = new PublicKey(
+    "BmBAppuJQGGHmVizxKLBpJbFtq8yGe9v7NeVgHPEM4Vs" // Replace with your actual program ID
+  );
+
+  const provider = new anchor.AnchorProvider(
+    connection,
+    new anchor.Wallet(adminKeypair),
+    anchor.AnchorProvider.defaultOptions()
+  );
+  anchor.setProvider(provider);
+
+  return {
+    program: new anchor.Program(idl, programId, provider),
+    adminPublicKey,
+    adminKeypair,
+    connection,
   };
-  // ✅ Function to initialize the staking pool and escrow account
-  export const initializeAccountsService = async (
-    adminPublicKey: PublicKey,
-    tournamentId: String,
-    entryFee: number,
-    mintPublicKey: PublicKey) => {
-    try {
-      const { program } = getProgram();
-  
-      const [tournamentPoolPublicKey] = PublicKey.findProgramAddressSync(
-        [Buffer.from("tournament_pool"), adminPublicKey.toBuffer()],
-        program.programId
-      );
-  
-      const [poolEscrowAccountPublicKey] = PublicKey.findProgramAddressSync(
-        [Buffer.from("escrow"), tournamentPoolPublicKey.toBuffer()],
-        program.programId
-      );
-  
-      console.log("🔹 tournamentPool PDA Address:", tournamentPoolPublicKey.toString());
-      console.log(
-        "🔹 Pool Escrow Account Address:",
-        poolEscrowAccountPublicKey.toString()
-      );
+};
+// ✅ Function to initialize the staking pool and escrow account
+export const initializeAccountsService = async (
+  adminPublicKey: PublicKey,
+  tournamentId: String,
+  entryFee: number,
+  mintPublicKey: PublicKey) => {
+  try {
+    const { program } = getProgram();
 
-      const entryFeeBN = new BN(entryFee);
+    const [tournamentPoolPublicKey] = PublicKey.findProgramAddressSync(
+      [Buffer.from("tournament_pool"), adminPublicKey.toBuffer()],
+      program.programId
+    );
 
-  
-      await program.methods
-        .createTournamentPool(tournamentId, entryFeeBN)
-        .accounts({
-          admin: adminPublicKey,
-          tournamentPool: tournamentPoolPublicKey,
-          mint: mintPublicKey,
-          poolEscrowAccount: poolEscrowAccountPublicKey,
-          systemProgram: SystemProgram.programId,
-          tokenProgram: TOKEN_2022_PROGRAM_ID,
-        })
-        .rpc();
-  
+    const [poolEscrowAccountPublicKey] = PublicKey.findProgramAddressSync(
+      [Buffer.from("escrow"), tournamentPoolPublicKey.toBuffer()],
+      program.programId
+    );
+
+    console.log("🔹 tournamentPool PDA Address:", tournamentPoolPublicKey.toString());
+    console.log(
+      "🔹 Pool Escrow Account Address:",
+      poolEscrowAccountPublicKey.toString()
+    );
+
+    const entryFeeBN = new BN(entryFee);
+
+
+    await program.methods
+      .createTournamentPool(tournamentId, entryFeeBN)
+      .accounts({
+        admin: adminPublicKey,
+        tournamentPool: tournamentPoolPublicKey,
+        mint: mintPublicKey,
+        poolEscrowAccount: poolEscrowAccountPublicKey,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .rpc();
+
     // After initializing the tournament pool, fetch its data
     const tournamentPoolData = await getTournamentPool(adminPublicKey);
 
@@ -94,21 +94,21 @@ import { BN } from "bn.js";
     console.error('❌ Error initializing tournament pool:', err);
     return { success: false, message: 'Error initializing tournament pool' };
   }
-  };
+};
 
 
 
-  
-  
-  interface TournamentPoolAccount {
-    admin: PublicKey;
-    mint: PublicKey, // Admin public key
-    tournamentId: string; // Tournament ID
-    entryFee: anchor.BN; // Entry fee in base units (e.g., lamports or token units)
-    totalFunds: anchor.BN; // Total funds accumulated in the pool
-    bump: number; // Bump seed for the tournament pool account
-  }
-  
+
+
+interface TournamentPoolAccount {
+  admin: PublicKey;
+  mint: PublicKey, // Admin public key
+  tournamentId: string; // Tournament ID
+  entryFee: anchor.BN; // Entry fee in base units (e.g., lamports or token units)
+  totalFunds: anchor.BN; // Total funds accumulated in the pool
+  bump: number; // Bump seed for the tournament pool account
+}
+
 
 // Fetch the Tournament Pool Account
 export const getTournamentPool = async (adminPublicKey: PublicKey) => {
@@ -165,7 +165,7 @@ export const registerForTournamentService = async (
 
 ) => {
   try {
-    const { program, connection  } = getProgram();
+    const { program, connection } = getProgram();
 
     // Fetch the tournament pool details (including entryFee)
     const tournamentPoolData = await getTournamentPool(adminPublicKey);
@@ -324,8 +324,8 @@ export const registerForTournamentServiceWithKeypair = async (
     // Confirm the transaction
     const confirmation = await connection.confirmTransaction(transactionSignature, 'confirmed');
 
-    
-    
+
+
     return {
       success: true,
       message: 'Transaction created, signed, and sent successfully!',
@@ -339,46 +339,45 @@ export const registerForTournamentServiceWithKeypair = async (
 
 
 
-  
-  
-  // ✅ Helper function to get or create an associated token account
-  async function getOrCreateAssociatedTokenAccount(
-    connection: Connection,
-    mint: PublicKey,
-    owner: PublicKey
-  ): Promise<PublicKey> {
-    const associatedTokenAddress = getAssociatedTokenAddressSync(
-      mint,
-      owner,
-      false, // ✅ Not a PDA
-      TOKEN_2022_PROGRAM_ID
+
+
+// ✅ Helper function to get or create an associated token account
+async function getOrCreateAssociatedTokenAccount(
+  connection: Connection,
+  mint: PublicKey,
+  owner: PublicKey
+): Promise<PublicKey> {
+  const associatedTokenAddress = getAssociatedTokenAddressSync(
+    mint,
+    owner,
+    false, // ✅ Not a PDA
+    TOKEN_2022_PROGRAM_ID
+  );
+
+  const accountInfo = await connection.getAccountInfo(associatedTokenAddress);
+
+  if (!accountInfo) {
+    console.log(
+      `🔹 Token account does not exist. Creating ATA: ${associatedTokenAddress.toBase58()}`
     );
-  
-    const accountInfo = await connection.getAccountInfo(associatedTokenAddress);
-  
-    if (!accountInfo) {
-      console.log(
-        `🔹 Token account does not exist. Creating ATA: ${associatedTokenAddress.toBase58()}`
-      );
-  
-      const transaction = new anchor.web3.Transaction().add(
-        createAssociatedTokenAccountInstruction(
-          owner,
-          associatedTokenAddress,
-          owner,
-          mint,
-          TOKEN_2022_PROGRAM_ID
-        )
-      );
-      const { adminKeypair } = getProgram();
-      await anchor.web3.sendAndConfirmTransaction(connection, transaction, [
-        adminKeypair
-      ]);
-      console.log(`✅ Successfully created ATA: ${associatedTokenAddress.toBase58()}`);
-    } else {
-      console.log(`🔹 Token account exists: ${associatedTokenAddress.toBase58()}`);
-    }
-  
-    return associatedTokenAddress;
+
+    const transaction = new anchor.web3.Transaction().add(
+      createAssociatedTokenAccountInstruction(
+        owner,
+        associatedTokenAddress,
+        owner,
+        mint,
+        TOKEN_2022_PROGRAM_ID
+      )
+    );
+    const { adminKeypair } = getProgram();
+    await anchor.web3.sendAndConfirmTransaction(connection, transaction, [
+      adminKeypair
+    ]);
+    console.log(`✅ Successfully created ATA: ${associatedTokenAddress.toBase58()}`);
+  } else {
+    console.log(`🔹 Token account exists: ${associatedTokenAddress.toBase58()}`);
   }
-  
+
+  return associatedTokenAddress;
+}
